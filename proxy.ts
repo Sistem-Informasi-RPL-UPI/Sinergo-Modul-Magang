@@ -8,8 +8,7 @@ function isAuthorizedForPath(pathname: string, role: RoleUserType): boolean {
     return role === "MAHASISWA";
   }
   if (pathname.startsWith("/dosen")) {
-    // Kaprodi diizinkan membuka ruang kerja Dosen apabila merangkap sebagai Dosen Pengampu MK konversi.
-    return role === "DOSEN" || role === "KAPRODI";
+    return role === "DOSEN";
   }
   if (pathname.startsWith("/kaprodi")) {
     return role === "KAPRODI";
@@ -23,6 +22,25 @@ function isAuthorizedForPath(pathname: string, role: RoleUserType): boolean {
 export async function proxy(request: NextRequest): Promise<NextResponse> {
   const { pathname, search } = request.nextUrl;
 
+  const token = await getToken({
+    req: request,
+    secret: process.env.NEXTAUTH_SECRET,
+  });
+
+  const hasValidSession = Boolean(
+    token && token.error !== "RefreshAccessTokenError",
+  );
+
+  // Halaman utama tidak berada di Modul 5; langsung arahkan ke dashboard role atau otomatis ke login SSO SACIBIRU.
+  if (pathname === "/") {
+    if (hasValidSession && token) {
+      return NextResponse.redirect(
+        new URL(getDefaultDashboardByRole(token.role), request.url),
+      );
+    }
+    return NextResponse.redirect(new URL("/sso/login", request.url));
+  }
+
   const isProtectedRoute =
     pathname.startsWith("/mahasiswa") ||
     pathname.startsWith("/dosen") ||
@@ -33,16 +51,11 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
     return NextResponse.next();
   }
 
-  const token = await getToken({
-    req: request,
-    secret: process.env.NEXTAUTH_SECRET,
-  });
-
-  if (!token || token.error === "RefreshAccessTokenError") {
+  if (!hasValidSession || !token) {
     const returnTo = safeReturnPath(`${pathname}${search}`, "/");
-    const signInUrl = new URL("/api/auth/signin", request.url);
-    signInUrl.searchParams.set("callbackUrl", returnTo);
-    return NextResponse.redirect(signInUrl);
+    const ssoLoginUrl = new URL("/sso/login", request.url);
+    ssoLoginUrl.searchParams.set("callbackUrl", returnTo);
+    return NextResponse.redirect(ssoLoginUrl);
   }
 
   if (!isAuthorizedForPath(pathname, token.role)) {
@@ -56,9 +69,14 @@ export async function proxy(request: NextRequest): Promise<NextResponse> {
 
 export const config = {
   matcher: [
+    "/",
+    "/mahasiswa",
     "/mahasiswa/:path*",
+    "/dosen",
     "/dosen/:path*",
+    "/kaprodi",
     "/kaprodi/:path*",
+    "/admin",
     "/admin/:path*",
   ],
 };

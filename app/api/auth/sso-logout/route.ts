@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { buildSsoLogoutUrl, getAuthSession } from "@/libs/auth";
 import { prisma } from "@/libs/prisma";
 import { jsonSuccess } from "@/utils/api-response";
@@ -20,14 +20,16 @@ async function clearRefreshTokenIfPresent(): Promise<void> {
   }
 }
 
-export async function GET(): Promise<NextResponse> {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   await clearRefreshTokenIfPresent();
-  return NextResponse.redirect(buildSsoLogoutUrl());
+  const reloginToModule = request.nextUrl.searchParams.get("relogin") === "1";
+  return NextResponse.redirect(buildSsoLogoutUrl({ reloginToModule }));
 }
 
-export async function POST() {
+export async function POST(request: NextRequest) {
   await clearRefreshTokenIfPresent();
+  const reloginToModule = request.nextUrl.searchParams.get("relogin") === "1";
   return jsonSuccess("Sesi refresh token berhasil dicabut.", {
-    logoutUrl: buildSsoLogoutUrl(),
+    logoutUrl: buildSsoLogoutUrl({ reloginToModule }),
   });
 }

@@ -1,10 +1,11 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import { createRemoteJWKSet, jwtVerify, type JWTPayload } from "jose";
-import { getServerSession, type NextAuthOptions } from "next-auth";
+import { redirect } from "next/navigation";
+import { getServerSession, type NextAuthOptions, type Session } from "next-auth";
 import type { JWT } from "next-auth/jwt";
 import { prisma } from "@/libs/prisma";
 import type { RoleUserType } from "@/types";
-import { safeReturnPath } from "@/utils/safe-return";
+import { getDefaultDashboardByRole, safeReturnPath } from "@/utils/safe-return";
 
 interface SacibiruJwtClaims extends JWTPayload {
   sub: string;
@@ -23,9 +24,12 @@ type SacibiruTokenResponse = {
   [key: string]: unknown;
 };
 
-const ssoUrl = (process.env.SSO_URL ?? "https://sso.kampus.ac.id").replace(/\/+$/, "");
+const ssoUrl = (process.env.SSO_URL ?? "https://verval-two.vercel.app").replace(/\/+$/, "");
 const ssoClientId = process.env.SSO_CLIENT_ID ?? "sinergo-modul-magang";
 const ssoClientSecret = process.env.SSO_CLIENT_SECRET ?? "";
+const ssoRedirectUri =
+  process.env.SSO_REDIRECT_URI ??
+  `${(process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(/\/+$/, "")}/api/auth/callback/sacibiru`;
 
 // Cache JWKS selama 5 menit sesuai spesifikasi SSO SACIBIRU dan otomatis muat ulang saat bertemu kid baru.
 const jwks = createRemoteJWKSet(new URL("/api/sso/jwks", ssoUrl), {
@@ -74,7 +78,6 @@ export function mapSsoRoleToAppRole(rawRole: string): RoleUserType | null {
     case "Dosen":
       return "DOSEN";
     case "Admin":
-    case "Staff_Kaprodi":
       return "ADMIN";
     case "Kaprodi":
       return "KAPRODI";
@@ -238,6 +241,7 @@ export const authOptions: NextAuthOptions = {
     maxAge: 30 * 24 * 60 * 60,
   },
   pages: {
+    signIn: "/sso/login",
     error: "/akses-ditolak",
   },
   providers: [
@@ -253,14 +257,13 @@ export const authOptions: NextAuthOptions = {
         params: {
           scope: "",
           response_type: "code",
+          redirect_uri: ssoRedirectUri,
         },
       },
       token: {
         url: `${ssoUrl}/api/sso/token`,
         async request(context) {
-          const redirectUri =
-            context.provider.callbackUrl ??
-            `${process.env.NEXTAUTH_URL ?? "http://localhost:3000"}/api/auth/callback/sacibiru`;
+          const redirectUri = process.env.SSO_REDIRECT_URI ?? context.provider.callbackUrl ?? ssoRedirectUri;
 
           const body = new URLSearchParams({
             grant_type: "authorization_code",
@@ -376,6 +379,14 @@ export const authOptions: NextAuthOptions = {
       }
       try {
         const parsed = new URL(url);
+        const ssoOrigin = new URL(ssoUrl).origin;
+        // Izinkan pengalihan keluar khusus ke rute logout resmi SSO SACIBIRU agar sesi pusat ikut terhapus.
+        if (
+          parsed.origin === ssoOrigin &&
+          (parsed.pathname === "/logout" || parsed.pathname === "/api/sso/logout")
+        ) {
+          return parsed.toString();
+        }
         if (parsed.origin === baseUrl) {
           return `${baseUrl}${safeReturnPath(`${parsed.pathname}${parsed.search}`, "/")}`;
         }
@@ -391,12 +402,37 @@ export function getAuthSession() {
   return getServerSession(authOptions);
 }
 
-export function buildSsoLogoutUrl(postLogoutUri?: string): string {
-  const logoutUrl = new URL("/api/sso/logout", ssoUrl);
-  logoutUrl.searchParams.set("client_id", ssoClientId);
-  logoutUrl.searchParams.set(
-    "post_logout_redirect_uri",
-    postLogoutUri ?? process.env.NEXTAUTH_URL ?? "http://localhost:3000/",
-  );
-  return logoutUrl.toString();
+// Guard sisi Server Component agar tidak ada halaman role yang dapat di-render statis atau diakses tanpa sesi SSO sah.
+export async function requireRoleSession(
+  allowedRoles: RoleUserType[],
+  targetPath: string,
+): Promise<Session> {
+  const session = await getAuthSession();
+
+  if (!session?.user || session.error === "RefreshAccessTokenError") {
+    redirect(`/sso/login?callbackUrl=${encodeURIComponent(safeReturnPath(targetPath, "/"))}`);
+  }
+
+  if (!allowedRoles.includes(session.user.role)) {
+    redirect(
+      `/akses-ditolak?from=${encodeURIComponent(getDefaultDashboardByRole(session.user.role))}`,
+    );
+  }
+
+  return session;
+}
+
+export function buildSsoLogoutUrl(options?: { reloginToModule?: boolean }): string {
+  if (options?.reloginToModule) {
+    const baseUrl = (process.env.NEXTAUTH_URL ?? "http://localhost:3000").replace(
+      /\/+$/,
+      "",
+    );
+    const reloginLogoutUrl = new URL("/api/sso/logout", ssoUrl);
+    reloginLogoutUrl.searchParams.set("client_id", ssoClientId);
+    reloginLogoutUrl.searchParams.set("post_logout_redirect_uri", `${baseUrl}/`);
+    return reloginLogoutUrl.toString();
+  }
+
+  return new URL("/logout", ssoUrl).toString();
 }
