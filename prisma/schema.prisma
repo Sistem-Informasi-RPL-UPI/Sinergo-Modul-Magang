@@ -1,0 +1,426 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleUser {
+  MAHASISWA
+  DOSEN
+  ADMIN
+  KAPRODI
+}
+
+enum SumberLowongan {
+  MITRA_KAMPUS
+  BINAAN_DOSEN
+}
+
+enum StatusLowongan {
+  DRAF
+  AKTIF
+  TUTUP
+}
+
+enum JenisProgramMbkm {
+  MSIB
+  SI
+  PMM
+  KM
+  IISMA
+  WMK
+  PM
+  MM
+  RISET
+}
+
+enum KategoriAnalitikMbkm {
+  MAGANG
+  MBKM_LAINNYA
+}
+
+enum ModeKegiatan {
+  HYBRID
+  ONSITE
+  REMOTE
+  FLEKSIBEL
+}
+
+enum StatusPendataan {
+  DRAF
+  MENUNGGU
+  PERLU_REVISI
+  TERVERIFIKASI
+}
+
+enum JenisDokumenSk {
+  SK_PENUGASAN
+  SK_PEMBIMBING
+  SK_KUNJUNG_LAPANGAN
+}
+
+enum StatusPengesahanSk {
+  DRAF_MENUNGGU
+  DISAHKAN
+}
+
+enum JenisCatatanLogbook {
+  MINGGUAN
+  REKAP_BULANAN
+}
+
+enum StatusValidasiLogbook {
+  MENUNGGU_VALIDASI
+  TERVALIDASI
+  PERLU_REVISI
+}
+
+enum StatusBerkasAkhir {
+  DRAF
+  LENGKAP_DIKIRIM
+}
+
+enum TingkatKesesuaianMk {
+  SANGAT_SESUAI
+  SESUAI
+}
+
+enum StatusPenilaianKonversi {
+  BELUM_DINILAI
+  DRAF
+  DIPUBLIKASIKAN
+}
+
+model User {
+  id                    String    @id @default(uuid()) @db.Char(36)
+  ssoSub                String    @unique @map("sso_sub") @db.VarChar(128)
+  email                 String    @unique @db.VarChar(150)
+  nama                  String    @db.VarChar(150)
+  nipNim                String    @map("nip_nim") @db.VarChar(30)
+  role                  RoleUser
+  ssoRawRole            String    @map("sso_raw_role") @db.VarChar(30)
+  encryptedRefreshToken String?   @map("encrypted_refresh_token") @db.Text
+  lastLoginAt           DateTime? @map("last_login_at")
+  createdAt             DateTime  @default(now()) @map("created_at")
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  mahasiswa               Mahasiswa?
+  dosen                   Dosen?
+  lowongansDibuat         LowonganMagang[]  @relation("PembuatLowongan")
+  pendataansDiverifikasi  PendataanMagang[] @relation("VerifikatorPendataan")
+  dokumenSksDigenerasi    DokumenSk[]       @relation("GeneratorDokumenSk")
+
+  @@index([nipNim])
+  @@index([role])
+  @@map("users")
+}
+
+model Mahasiswa {
+  id          String   @id @default(uuid()) @db.Char(36)
+  userId      String   @unique @map("user_id") @db.Char(36)
+  nim         String   @unique @db.VarChar(20)
+  prodi       String   @default("Rekayasa Perangkat Lunak") @db.VarChar(100)
+  angkatan    Int      @db.SmallInt
+  statusAktif Boolean  @default(true) @map("status_aktif")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user       User              @relation(fields: [userId], references: [id], onDelete: Restrict)
+  lamarans   LamaranLowongan[]
+  pendataans PendataanMagang[]
+
+  @@index([angkatan])
+  @@map("mahasiswa")
+}
+
+model Dosen {
+  id           String   @id @default(uuid()) @db.Char(36)
+  userId       String   @unique @map("user_id") @db.Char(36)
+  nip          String   @unique @db.VarChar(30)
+  namaBergelar String   @map("nama_bergelar") @db.VarChar(150)
+  statusAktif  Boolean  @default(true) @map("status_aktif")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  user                 User                 @relation(fields: [userId], references: [id], onDelete: Restrict)
+  matakuliahsDiampu    MataKuliah[]
+  lowongansPj          LowonganMagang[]     @relation("DosenPjLowongan")
+  bimbinganPendataans  PendataanMagang[]    @relation("DosenPembimbingPendataan")
+  kunjunganPendataans  PendataanMagang[]    @relation("DosenKunjungPendataan")
+  dokumenSksDisahkan   DokumenSk[]          @relation("KaprodiPengesahSk")
+  logbooksDivalidasi   Logbook[]
+  konversiMksDinilai   KonversiMataKuliah[]
+
+  @@map("dosen")
+}
+
+model PeriodeSemester {
+  id             String   @id @default(uuid()) @db.Char(36)
+  kodeSemester   String   @unique @map("kode_semester") @db.VarChar(10)
+  namaSemester   String   @map("nama_semester") @db.VarChar(50)
+  jenisSemester  String   @map("jenis_semester") @db.VarChar(10)
+  isAktif        Boolean  @default(false) @map("is_aktif")
+  tanggalMulai   DateTime @map("tanggal_mulai") @db.Date
+  tanggalSelesai DateTime @map("tanggal_selesai") @db.Date
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  pendataans PendataanMagang[]
+
+  @@index([isAktif])
+  @@map("periode_semester")
+}
+
+model MataKuliah {
+  id              String   @id @default(uuid()) @db.Char(36)
+  dosenPengampuId String   @map("dosen_pengampu_id") @db.Char(36)
+  kodeMk          String   @unique @map("kode_mk") @db.VarChar(15)
+  namaMk          String   @map("nama_mk") @db.VarChar(150)
+  sks             Int      @default(3) @db.SmallInt
+  isKonversiMbkm  Boolean  @default(true) @map("is_konversi_mbkm")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  dosenPengampu  Dosen                @relation(fields: [dosenPengampuId], references: [id], onDelete: Restrict)
+  komponenRubrik KomponenRubrikMk[]
+  konversiMks    KonversiMataKuliah[]
+
+  @@index([dosenPengampuId])
+  @@map("matakuliah")
+}
+
+model KomponenRubrikMk {
+  id                String   @id @default(uuid()) @db.Char(36)
+  matakuliahId      String   @map("matakuliah_id") @db.Char(36)
+  namaKomponen      String   @map("nama_komponen") @db.VarChar(150)
+  deskripsiKomponen String   @map("deskripsi_komponen") @db.Text
+  bobotPersen       Decimal  @map("bobot_persen") @db.Decimal(5, 2)
+  urutan            Int      @default(1) @db.SmallInt
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  matakuliah   MataKuliah             @relation(fields: [matakuliahId], references: [id], onDelete: Cascade)
+  nilaiRubriks NilaiRubrikMahasiswa[]
+
+  @@index([matakuliahId])
+  @@map("komponen_rubrik_mk")
+}
+
+model LowonganMagang {
+  id               String         @id @default(uuid()) @db.Char(36)
+  pembuatUserId    String         @map("pembuat_user_id") @db.Char(36)
+  dosenPjId        String?        @map("dosen_pj_id") @db.Char(36)
+  judulLowongan    String         @map("judul_lowongan") @db.VarChar(150)
+  namaInstansi     String         @map("nama_instansi") @db.VarChar(150)
+  posisiBidang     String         @map("posisi_bidang") @db.VarChar(100)
+  lokasiModeKerja  String         @map("lokasi_mode_kerja") @db.VarChar(100)
+  sumberLowongan   SumberLowongan @default(MITRA_KAMPUS) @map("sumber_lowongan")
+  kontakInstansi   String         @map("kontak_instansi") @db.VarChar(150)
+  deskripsi        String         @db.Text
+  persyaratan      String         @db.Text
+  logoUrl          String?        @map("logo_url") @db.VarChar(255)
+  statusLowongan   StatusLowongan @default(DRAF) @map("status_lowongan")
+  jumlahPelamar    Int            @default(0) @map("jumlah_pelamar")
+  batasTanggal     DateTime?      @map("batas_tanggal") @db.Date
+  tanggalPublikasi DateTime?      @map("tanggal_publikasi")
+  createdAt        DateTime       @default(now()) @map("created_at")
+  updatedAt        DateTime       @updatedAt @map("updated_at")
+
+  pembuatUser User              @relation("PembuatLowongan", fields: [pembuatUserId], references: [id], onDelete: Restrict)
+  dosenPj     Dosen?            @relation("DosenPjLowongan", fields: [dosenPjId], references: [id], onDelete: Restrict)
+  lamarans    LamaranLowongan[]
+
+  @@index([judulLowongan])
+  @@index([namaInstansi])
+  @@index([sumberLowongan])
+  @@index([statusLowongan])
+  @@map("lowongan_magang")
+}
+
+model LamaranLowongan {
+  id           String   @id @default(uuid()) @db.Char(36)
+  lowonganId   String   @map("lowongan_id") @db.Char(36)
+  mahasiswaId  String   @map("mahasiswa_id") @db.Char(36)
+  tanggalMinat DateTime @default(now()) @map("tanggal_minat")
+
+  lowongan  LowonganMagang @relation(fields: [lowonganId], references: [id], onDelete: Cascade)
+  mahasiswa Mahasiswa      @relation(fields: [mahasiswaId], references: [id], onDelete: Cascade)
+
+  @@unique([lowonganId, mahasiswaId])
+  @@map("lamaran_lowongan")
+}
+
+model PendataanMagang {
+  id                String               @id @default(uuid()) @db.Char(36)
+  mahasiswaId       String               @map("mahasiswa_id") @db.Char(36)
+  semesterId        String               @map("semester_id") @db.Char(36)
+  dosenPembimbingId String               @map("dosen_pembimbing_id") @db.Char(36)
+  dosenKunjungId    String?              @map("dosen_kunjung_id") @db.Char(36)
+  verifiedByUserId  String?              @map("verified_by_user_id") @db.Char(36)
+  namaInstansi      String               @map("nama_instansi") @db.VarChar(150)
+  alamatInstansi    String               @map("alamat_instansi") @db.Text
+  kontakInstansi    String               @map("kontak_instansi") @db.VarChar(150)
+  posisi            String               @db.VarChar(100)
+  jenisProgram      JenisProgramMbkm     @map("jenis_program")
+  kategoriAnalitik  KategoriAnalitikMbkm @map("kategori_analitik")
+  modeKegiatan      ModeKegiatan         @default(HYBRID) @map("mode_kegiatan")
+  tanggalMulai      DateTime             @map("tanggal_mulai") @db.Date
+  tanggalSelesai    DateTime             @map("tanggal_selesai") @db.Date
+  fileLoaAwalUrl    String               @map("file_loa_awal_url") @db.VarChar(255)
+  fileLoaAwalNama   String               @map("file_loa_awal_nama") @db.VarChar(150)
+  pernyataanBenar   Boolean              @default(false) @map("pernyataan_benar")
+  statusPendataan   StatusPendataan      @default(DRAF) @map("status_pendataan")
+  catatanRevisi     String?              @map("catatan_revisi") @db.Text
+  submittedAt       DateTime?            @map("submitted_at")
+  verifiedAt        DateTime?            @map("verified_at")
+  createdAt         DateTime             @default(now()) @map("created_at")
+  updatedAt         DateTime             @updatedAt @map("updated_at")
+
+  mahasiswa       Mahasiswa            @relation(fields: [mahasiswaId], references: [id], onDelete: Restrict)
+  semester        PeriodeSemester      @relation(fields: [semesterId], references: [id], onDelete: Restrict)
+  dosenPembimbing Dosen                @relation("DosenPembimbingPendataan", fields: [dosenPembimbingId], references: [id], onDelete: Restrict)
+  dosenKunjung    Dosen?               @relation("DosenKunjungPendataan", fields: [dosenKunjungId], references: [id], onDelete: Restrict)
+  verifiedByUser  User?                @relation("VerifikatorPendataan", fields: [verifiedByUserId], references: [id], onDelete: Restrict)
+  dokumenSks      DokumenSk[]
+  logbooks        Logbook[]
+  berkasAkhir     BerkasAkhir?
+  konversiMks     KonversiMataKuliah[]
+
+  @@unique([mahasiswaId, semesterId])
+  @@index([mahasiswaId])
+  @@index([semesterId])
+  @@index([dosenPembimbingId])
+  @@index([dosenKunjungId])
+  @@index([namaInstansi])
+  @@index([jenisProgram])
+  @@index([kategoriAnalitik])
+  @@index([statusPendataan])
+  @@map("pendataan_magang")
+}
+
+model DokumenSk {
+  id                String             @id @default(uuid()) @db.Char(36)
+  pendataanId       String             @map("pendataan_id") @db.Char(36)
+  generatedByUserId String             @map("generated_by_user_id") @db.Char(36)
+  disahkanKaprodiId String?            @map("disahkan_kaprodi_id") @db.Char(36)
+  nomorSk           String             @map("nomor_sk") @db.VarChar(100)
+  jenisSk           JenisDokumenSk     @map("jenis_sk")
+  fileSkUrl         String             @map("file_sk_url") @db.VarChar(255)
+  statusPengesahan  StatusPengesahanSk @default(DRAF_MENUNGGU) @map("status_pengesahan")
+  tanggalDibuat     DateTime           @default(now()) @map("tanggal_dibuat")
+  tanggalDisahkan   DateTime?          @map("tanggal_disahkan")
+  createdAt         DateTime           @default(now()) @map("created_at")
+  updatedAt         DateTime           @updatedAt @map("updated_at")
+
+  pendataan       PendataanMagang @relation(fields: [pendataanId], references: [id], onDelete: Restrict)
+  generatedByUser User            @relation("GeneratorDokumenSk", fields: [generatedByUserId], references: [id], onDelete: Restrict)
+  disahkanKaprodi Dosen?          @relation("KaprodiPengesahSk", fields: [disahkanKaprodiId], references: [id], onDelete: Restrict)
+
+  @@unique([pendataanId, jenisSk])
+  @@index([pendataanId])
+  @@index([nomorSk])
+  @@index([statusPengesahan])
+  @@map("dokumen_sk")
+}
+
+model Logbook {
+  id                 String                @id @default(uuid()) @db.Char(36)
+  pendataanId        String                @map("pendataan_id") @db.Char(36)
+  validatedByDosenId String?               @map("validated_by_dosen_id") @db.Char(36)
+  jenisCatatan       JenisCatatanLogbook   @default(MINGGUAN) @map("jenis_catatan")
+  tanggal            DateTime              @db.Date
+  mingguKe           Int                   @map("minggu_ke") @db.SmallInt
+  deskripsiKegiatan  String                @map("deskripsi_kegiatan") @db.Text
+  fotoBuktiUrl       String                @map("foto_bukti_url") @db.VarChar(255)
+  namaFileBukti      String                @map("nama_file_bukti") @db.VarChar(150)
+  statusValidasi     StatusValidasiLogbook @default(MENUNGGU_VALIDASI) @map("status_validasi")
+  catatanPembimbing  String?               @map("catatan_pembimbing") @db.Text
+  validatedAt        DateTime?             @map("validated_at")
+  createdAt          DateTime              @default(now()) @map("created_at")
+  updatedAt          DateTime              @updatedAt @map("updated_at")
+
+  pendataan        PendataanMagang @relation(fields: [pendataanId], references: [id], onDelete: Cascade)
+  validatedByDosen Dosen?          @relation(fields: [validatedByDosenId], references: [id], onDelete: Restrict)
+
+  @@index([pendataanId])
+  @@index([tanggal])
+  @@index([statusValidasi])
+  @@map("logbook")
+}
+
+model BerkasAkhir {
+  id                   String            @id @default(uuid()) @db.Char(36)
+  pendataanId          String            @unique @map("pendataan_id") @db.Char(36)
+  loaUrl               String?           @map("loa_url") @db.VarChar(255)
+  loaUploadedAt        DateTime?         @map("loa_uploaded_at")
+  rubrikKonversiUrl    String?           @map("rubrik_konversi_url") @db.VarChar(255)
+  rubrikUploadedAt     DateTime?         @map("rubrik_uploaded_at")
+  laporanAkhirUrl      String?           @map("laporan_akhir_url") @db.VarChar(255)
+  laporanUploadedAt    DateTime?         @map("laporan_uploaded_at")
+  drafPksUrl           String?           @map("draf_pks_url") @db.VarChar(255)
+  pksUploadedAt        DateTime?         @map("pks_uploaded_at")
+  transkripInstansiUrl String?           @map("transkrip_instansi_url") @db.VarChar(255)
+  transkripUploadedAt  DateTime?         @map("transkrip_uploaded_at")
+  sertifikatUrl        String?           @map("sertifikat_url") @db.VarChar(255)
+  sertifikatUploadedAt DateTime?         @map("sertifikat_uploaded_at")
+  nilaiInstansi        Decimal?          @map("nilai_instansi") @db.Decimal(5, 2)
+  jumlahTerunggah      Int               @default(0) @map("jumlah_terunggah") @db.SmallInt
+  progresPersen        Int               @default(0) @map("progres_persen") @db.SmallInt
+  statusBerkas         StatusBerkasAkhir @default(DRAF) @map("status_berkas")
+  submittedAt          DateTime?         @map("submitted_at")
+  createdAt            DateTime          @default(now()) @map("created_at")
+  updatedAt            DateTime          @updatedAt @map("updated_at")
+
+  pendataan PendataanMagang @relation(fields: [pendataanId], references: [id], onDelete: Cascade)
+
+  @@index([statusBerkas])
+  @@map("berkas_akhir")
+}
+
+model KonversiMataKuliah {
+  id                   String                  @id @default(uuid()) @db.Char(36)
+  pendataanId          String                  @map("pendataan_id") @db.Char(36)
+  matakuliahId         String                  @map("matakuliah_id") @db.Char(36)
+  dosenPenilaiId       String?                 @map("dosen_penilai_id") @db.Char(36)
+  sksKonversi          Int                     @map("sks_konversi") @db.SmallInt
+  tingkatKesesuaian    TingkatKesesuaianMk     @default(SESUAI) @map("tingkat_kesesuaian")
+  nilaiInstansiRef     Decimal?                @map("nilai_instansi_ref") @db.Decimal(5, 2)
+  nilaiDosen           Decimal?                @map("nilai_dosen") @db.Decimal(5, 2)
+  nilaiAkhir           Decimal?                @map("nilai_akhir") @db.Decimal(5, 2)
+  nilaiHuruf           String?                 @map("nilai_huruf") @db.VarChar(3)
+  catatanDosenPengampu String?                 @map("catatan_dosen_pengampu") @db.Text
+  statusPenilaian      StatusPenilaianKonversi @default(BELUM_DINILAI) @map("status_penilaian")
+  publishedAt          DateTime?               @map("published_at")
+  createdAt            DateTime                @default(now()) @map("created_at")
+  updatedAt            DateTime                @updatedAt @map("updated_at")
+
+  pendataan    PendataanMagang        @relation(fields: [pendataanId], references: [id], onDelete: Cascade)
+  matakuliah   MataKuliah             @relation(fields: [matakuliahId], references: [id], onDelete: Restrict)
+  dosenPenilai Dosen?                 @relation(fields: [dosenPenilaiId], references: [id], onDelete: Restrict)
+  nilaiRubriks NilaiRubrikMahasiswa[]
+
+  @@unique([pendataanId, matakuliahId])
+  @@index([pendataanId])
+  @@index([matakuliahId])
+  @@index([dosenPenilaiId])
+  @@index([statusPenilaian])
+  @@map("konversi_matakuliah")
+}
+
+model NilaiRubrikMahasiswa {
+  id               String   @id @default(uuid()) @db.Char(36)
+  konversiMkId     String   @map("konversi_mk_id") @db.Char(36)
+  komponenRubrikId String   @map("komponen_rubrik_id") @db.Char(36)
+  skor             Decimal  @db.Decimal(5, 2)
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  konversiMk     KonversiMataKuliah @relation(fields: [konversiMkId], references: [id], onDelete: Cascade)
+  komponenRubrik KomponenRubrikMk   @relation(fields: [komponenRubrikId], references: [id], onDelete: Cascade)
+
+  @@unique([konversiMkId, komponenRubrikId])
+  @@map("nilai_rubrik_mahasiswa")
+}
