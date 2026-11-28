@@ -107,6 +107,122 @@ async function verifySacibiruAccessToken(accessToken: string): Promise<SacibiruJ
   return payload as SacibiruJwtClaims;
 }
 
+export async function upsertSsoUserRecord(input: {
+  ssoSub: string;
+  email: string;
+  nama: string;
+  nipNim: string;
+  mappedRole: RoleUserType;
+  ssoRawRole: string;
+  encryptedRefreshToken?: string;
+}): Promise<string> {
+  if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes("YOUR_AIVEN_PASSWORD")) {
+    return input.ssoSub;
+  }
+
+  return prisma.$transaction(async (tx) => {
+    const existingBySub = await tx.user.findUnique({
+      where: { ssoSub: input.ssoSub },
+    });
+    const existingByEmail = existingBySub
+      ? null
+      : await tx.user.findUnique({
+          where: { email: input.email },
+        });
+    const targetUser = existingBySub ?? existingByEmail;
+
+    const user = targetUser
+      ? await tx.user.update({
+          where: { id: targetUser.id },
+          data: {
+            ssoSub: input.ssoSub,
+            email: input.email,
+            nama: input.nama,
+            nipNim: input.nipNim,
+            role: input.mappedRole,
+            ssoRawRole: input.ssoRawRole,
+            ...(input.encryptedRefreshToken !== undefined
+              ? { encryptedRefreshToken: input.encryptedRefreshToken }
+              : {}),
+            lastLoginAt: new Date(),
+          },
+        })
+      : await tx.user.create({
+          data: {
+            ssoSub: input.ssoSub,
+            email: input.email,
+            nama: input.nama,
+            nipNim: input.nipNim,
+            role: input.mappedRole,
+            ssoRawRole: input.ssoRawRole,
+            ...(input.encryptedRefreshToken !== undefined
+              ? { encryptedRefreshToken: input.encryptedRefreshToken }
+              : {}),
+            lastLoginAt: new Date(),
+          },
+        });
+
+    if (input.mappedRole === "MAHASISWA") {
+      const inferredYear = Number.parseInt(`20${input.nipNim.slice(0, 2)}`, 10);
+      const angkatan =
+        Number.isFinite(inferredYear) && inferredYear >= 2015 && inferredYear <= 2099
+          ? inferredYear
+          : new Date().getFullYear();
+
+      const existingMhs = await tx.mahasiswa.findFirst({
+        where: {
+          OR: [{ userId: user.id }, { nim: input.nipNim }],
+        },
+      });
+
+      if (existingMhs) {
+        await tx.mahasiswa.update({
+          where: { id: existingMhs.id },
+          data: {
+            userId: user.id,
+            nim: input.nipNim,
+          },
+        });
+      } else {
+        await tx.mahasiswa.create({
+          data: {
+            userId: user.id,
+            nim: input.nipNim,
+            angkatan,
+          },
+        });
+      }
+    } else if (input.mappedRole === "DOSEN" || input.mappedRole === "KAPRODI") {
+      const existingDosen = await tx.dosen.findFirst({
+        where: {
+          OR: [{ userId: user.id }, { nip: input.nipNim }],
+        },
+      });
+
+      if (existingDosen) {
+        await tx.dosen.update({
+          where: { id: existingDosen.id },
+          data: {
+            userId: user.id,
+            nip: input.nipNim,
+            namaBergelar: input.nama,
+          },
+        });
+      } else {
+        await tx.dosen.create({
+          data: {
+            userId: user.id,
+            nip: input.nipNim,
+            namaBergelar: input.nama,
+          },
+        });
+      }
+    }
+
+    return user.id;
+  });
+}
+
 async function syncUserToDatabase(
   claims: SacibiruJwtClaims,
   mappedRole: RoleUserType,
@@ -116,59 +232,15 @@ async function syncUserToDatabase(
     return claims.sub;
   }
 
-  const encryptedRefreshToken = encryptToken(refreshToken);
-  const user = await prisma.user.upsert({
-    where: { ssoSub: claims.sub },
-    update: {
-      email: claims.email,
-      nama: claims.name,
-      nipNim: claims.nip,
-      role: mappedRole,
-      ssoRawRole: claims.role,
-      encryptedRefreshToken,
-      lastLoginAt: new Date(),
-    },
-    create: {
-      ssoSub: claims.sub,
-      email: claims.email,
-      nama: claims.name,
-      nipNim: claims.nip,
-      role: mappedRole,
-      ssoRawRole: claims.role,
-      encryptedRefreshToken,
-      lastLoginAt: new Date(),
-    },
+  return upsertSsoUserRecord({
+    ssoSub: claims.sub,
+    email: claims.email,
+    nama: claims.name,
+    nipNim: claims.nip,
+    mappedRole,
+    ssoRawRole: claims.role,
+    encryptedRefreshToken: encryptToken(refreshToken),
   });
-
-  if (mappedRole === "MAHASISWA") {
-    const inferredYear = Number.parseInt(`20${claims.nip.slice(0, 2)}`, 10);
-    const angkatan = Number.isFinite(inferredYear) ? inferredYear : new Date().getFullYear();
-
-    await prisma.mahasiswa.upsert({
-      where: { userId: user.id },
-      update: { nim: claims.nip },
-      create: {
-        userId: user.id,
-        nim: claims.nip,
-        angkatan,
-      },
-    });
-  } else if (mappedRole === "DOSEN" || mappedRole === "KAPRODI") {
-    await prisma.dosen.upsert({
-      where: { userId: user.id },
-      update: {
-        nip: claims.nip,
-        namaBergelar: claims.name,
-      },
-      create: {
-        userId: user.id,
-        nip: claims.nip,
-        namaBergelar: claims.name,
-      },
-    });
-  }
-
-  return user.id;
 }
 
 async function performRefreshTokenRotation(token: JWT): Promise<JWT> {

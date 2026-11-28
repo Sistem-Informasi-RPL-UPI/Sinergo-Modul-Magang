@@ -21,6 +21,10 @@ next-env.d.ts
 /.agents/
 /docs/
 /rules/
+/roadmaps/
+
+# Local development uploaded files
+/.storage/
 
 # Logs & OS artifacts
 npm-debug.log*
