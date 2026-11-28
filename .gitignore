@@ -22,6 +22,8 @@ next-env.d.ts
 /docs/
 /rules/
 /roadmaps/
+/AGENTS.md
+/DESIGN.md
 
 # Local development uploaded files
 /.storage/
