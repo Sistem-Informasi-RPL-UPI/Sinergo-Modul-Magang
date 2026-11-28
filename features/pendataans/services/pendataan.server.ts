@@ -193,7 +193,7 @@ function mapPendataanDetailDto(
       id: sk.id,
       nomorSk: sk.nomorSk,
       jenisSk: sk.jenisSk,
-      fileSkUrl: sk.fileSkUrl,
+      fileSkUrl: `/api/sks/${sk.id}/unduh`,
       statusPengesahan: sk.statusPengesahan,
       tanggalDibuat: sk.tanggalDibuat.toISOString(),
       tanggalDisahkan: sk.tanggalDisahkan
@@ -683,7 +683,7 @@ export async function listRekapPendataansForVerifikasi(
         id: sk.id,
         nomorSk: sk.nomorSk,
         jenisSk: sk.jenisSk,
-        fileSkUrl: sk.fileSkUrl,
+        fileSkUrl: `/api/sks/${sk.id}/unduh`,
         statusPengesahan: sk.statusPengesahan,
         tanggalDibuat: sk.tanggalDibuat.toISOString(),
         tanggalDisahkan: sk.tanggalDisahkan
